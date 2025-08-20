@@ -18,7 +18,7 @@ Designed as a drop-in replacement for the standard [`ArduinoRS485`](https://www.
 
 ## 📦 ⚠️ Important installation note ⚠️
 
-Until the [pull request](link-to-PR) to the official [ArduinoCore-sam](https://github.com/arduino/ArduinoCore-sam) is accepted, you must manually patch your Arduino core:
+Until the [pull request](https://github.com/arduino/ArduinoCore-sam/pull/152) to the official [ArduinoCore-sam](https://github.com/arduino/ArduinoCore-sam) is accepted, you must manually patch your Arduino core:
 
 ⚠️ Required Core Patch
 
