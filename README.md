@@ -100,8 +100,7 @@ Arduino IDE
 
 3. In your sketch, enable DMA mode and define which RS485 ports you want to use before including the library:
 ```cpp
-#define USE_DUERS485DMA        // MUST be defined before inclusion
-#define USE_RS485_SERIAL1      // enable RS485 on Serial1
+#define USE_RS485_SERIAL1      // enable RS485 on Serial1, must be set before include
 #include <DUERS485DMA.h>
 ```
 
@@ -120,7 +119,7 @@ pio pkg install -l nitrofmtl/duers485dma
 ```
 lib_deps = 
     yourname/DUERS485DMA
-build_flags = -DUSE_DUERS485DMA, -DUSE_RS485_SERIAL1
+build_flags = -DUSE_RS485_SERIAL1
 ```
 3. include the library:
 ```

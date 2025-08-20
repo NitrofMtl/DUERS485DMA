@@ -6,7 +6,7 @@
 #else
 
 #ifndef USE_DUERS485DMA
-#warning "Compiling without DMA support. Define USE_DUERS485DMA to enable it."
+//#warning "Compiling without DMA support. Define USE_DUERS485DMA to enable it."
 #endif
 
 //For use with arduino IDE
