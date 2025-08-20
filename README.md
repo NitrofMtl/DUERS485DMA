@@ -16,6 +16,68 @@ Designed as a drop-in replacement for the standard [`ArduinoRS485`](https://www.
 
 ---
 
+## 📦 ⚠️ Important installation note ⚠️
+
+Until the [pull request](link-to-PR) to the official [ArduinoCore-sam](https://github.com/arduino/ArduinoCore-sam) is accepted, you must manually patch your Arduino core:
+
+⚠️ Required Core Patch
+
+To use DUERS485DMA, you must make the `USARTx_Handler(void)` weak so the library can override it.
+
+This patch does **not** change the normal functionality of the core:
+
+- If DUERS485DMA is not used, the original functions behave as before.  
+- If DUERS485DMA is included, it overrides them where needed.  
+
+You can choose to make all predefined USART `USARTx_Handler(void)` functions weak, or only the ones you intend to use.  
+
+**Note:** `USART2_Handler(void)` was not predefined in the core, so no patch is needed there.
+
+📂 File locations
+
+Arduino IDE (Windows):
+```cpp
+C:\Users\<YourName>\AppData\Local\Arduino15\packages\arduino\hardware\sam\1.6.12\variants\arduino_due_x\variant.cpp
+```
+
+PlatformIO:
+
+Linux / macOS:
+```cpp
+~/.platformio/packages/framework-arduinosam/variants/arduino_due_x/variant.cpp
+```
+
+Windows:
+```cpp
+C:\Users\<YourName>\.platformio\packages\framework-arduinosam\variants\arduino_due_x\variant.cpp
+```
+
+## Locate your board’s variant.cpp file and edit the IrqHandler() definition:
+
+Handlers defined in ArduinoCore-sam
+
+In variant.cpp for the Arduino Due, you will find:
+```cpp
+void USART0_Handler(void) { Serial1.IrqHandler(); } //Serial1
+void USART1_Handler(void) { Serial2.IrqHandler(); } //serial2
+void USART3_Handler(void) { Serial3.IrqHandler(); } //Serial3
+// Note: USART2_Handler is not defined in the core, nothing to do
+```
+
+Before
+```cpp
+void USART0_Handler(void) {
+  // original IRQ handler code
+}
+```
+
+After
+```cpp
+__attribute__((weak)) void USART0_Handler(void) {
+  // original IRQ handler code
+}
+```
+
 ## 📦 Installation & Configuration
 
 ### Enable RS485 Ports
@@ -28,8 +90,7 @@ Each must be enabled with a macro before including the library:
 #define USE_RS485_SERIAL3 // enable RS485 on Serial3
 #define USE_RS485_USART2  // enable RS485 on USART2
 ```
-
-⚠️ Note: Enabling RS485 on a USART port will disable the standard SerialX object for that port to prevent misusage.
+---
 
 Arduino IDE
 
@@ -43,6 +104,12 @@ Arduino IDE
 #define USE_RS485_SERIAL1      // enable RS485 on Serial1
 #include <DUERS485DMA.h>
 ```
+
+---
+
+⚠️ Note: Enabling RS485 on a USART port will disable the standard SerialX object for that port to prevent misusage.
+
+---
 
 ### PlatformIO
 1. install the library:
