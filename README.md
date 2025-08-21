@@ -163,7 +163,7 @@ void loop() {
 However, the official library does not currently support external RS485 backends.  
 
 ➡️ To use with DMA, clone and install this fork:  
-HAVE TO CHANGE FOR BRANCH UPTADED [DUERS485DMA-Compatible ArduinoModbus](https://github.com/NitrofMtl/ArduinoModbusDUE)  
+HAVE TO CHANGE FOR BRANCH UPTADED [DUERS485DMA-Compatible ArduinoModbus](https://github.com/NitrofMtl/ArduinoModbus-DUE-DMA)  
 
 Usage example:  
 ```cpp
