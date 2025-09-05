@@ -94,6 +94,15 @@ Each must be enabled with a macro before including the library:
 
 Arduino IDE
 
+## ⚠️ Arduino IDE Notice
+
+The official **Arduino SAM core (DUE)** has been **abandoned** and does not build with **Arduino IDE 2.x**.  
+This library has been tested with **PlatformIO** and may work with **Arduino IDE 1.8.x**, but support for IDE ≥ 2.0 is **not guaranteed**.  
+
+👉 **Recommendation:** Use **PlatformIO**, which (as of today) still supports the SAM3X8E (Arduino DUE).
+
+---
+
 1. Download or clone this repository into your libraries/ folder.
 
 2. Restart the Arduino IDE.
