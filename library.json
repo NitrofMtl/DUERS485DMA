@@ -1,6 +1,6 @@
 {
   "name": "DUERS485DMA",
-  "version": "0.9.5",
+  "version": "0.9.6",
   "description": "High-speed RS485 DMA library for Arduino DUE, (almost) drop-in replacement for ArduinoRS485.",
   "keywords": ["RS485", "DMA", "Arduino DUE", "Serial"],
   "repository": {

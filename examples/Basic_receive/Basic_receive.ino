@@ -11,12 +11,13 @@
 #define BAUDRATE 9600
 
 void setup() {
+  Serial.begin(9600);
   RS485.begin(BAUDRATE);
 }
 
 void loop() {
   if (RS485.available()) {
     int b = RS485.read();
-    SerialUSB.write(b); // echo to USB console
+    Serial.write(b); // echo to USB console
   }
 }

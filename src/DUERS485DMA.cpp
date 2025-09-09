@@ -260,10 +260,6 @@ void DUERS485DMAClass::receive() {
         // Clear any pending error/status flags (stale RXRDY, etc.)
     _pUsart->US_CR = US_CR_RSTSTA;
 
-    // --- Clear software & DMA RX buffers ---
-    _dma_rx_pos = 0;
-    _rx_buffer->_iHead = _rx_buffer->_iTail = 0;
-
     // Reset DMA buffer pointer & count
     _pUsart->US_RPR = (uint32_t)_dma_rx_buffer;
     _pUsart->US_RCR = DMA_RX_BUFFER_SIZE;
@@ -336,7 +332,6 @@ void DUERS485DMAClass::updateRXBuffer()
     if ((_dma_rx_pos >= DMA_RX_BUFFER_SIZE) && (ring_buffer_size(_rx_buffer) < SERIAL_BUFFER_SIZE - 1)) {
         // Reset DMA for next block
         _dma_rx_pos = 0;
-        receive();  // This sets up US_RCR and restarts the hardware DMA
     }
 }
 
