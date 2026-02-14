@@ -14,7 +14,8 @@
 void setup() {
   Serial.begin(115200);
   RS485.begin(BAUDRATE);
-  RS485.setRXIdleTime(3.5f); // ~3.5 chars (Modbus RTU spec)
+  uint32_t usecIdle = RS485.getUsecForNChar(3.5f);
+  RS485.setRXIdleTime(usecIdle); // ~3.5 chars (Modbus RTU spec)
 }
 
 void loop() {

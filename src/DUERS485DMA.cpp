@@ -90,7 +90,9 @@ void DUERS485DMAClass::begin(unsigned long baudrate, UARTClass::UARTModes config
     _tx_buffer->_iHead = _tx_buffer->_iTail = 0;
 
     //set timeout rx
-    setRXIdleTime();//default at 3.5 char
+    setRxTimeout();
+    uint32_t idleTime = getUsecForNChar(RS485DEFAULT_RX_IDLE_CHARS);
+    setRXIdleTime(idleTime);
 
     receive();
     NVIC_EnableIRQ(_dwIrq);
@@ -117,20 +119,8 @@ void DUERS485DMAClass::setTxTimeout(int timeout)
     _txTimeoutUs = timeout;
 }
 
-/*
-Calculating charTimeBitClocks:
-At 115200 baud:
 
-1 bit = 1 / 115200 ≈ 8.68 μs
-
-10 bits/char = 86.8 μs per char
-
-3.5 chars = 304 μs(default for Modbus)
-
-The SAM3X USART expects this in number of bit periods, so just do:
-US_RTOR = (35); for 3.5 chars.
-*/
-void DUERS485DMAClass::setRXIdleTime(float charMultiple)
+int DUERS485DMAClass::getBitsPerChar() const
 {
     uint32_t mr = _pUsart->US_MR; // Mode Register
 
@@ -154,31 +144,50 @@ void DUERS485DMAClass::setRXIdleTime(float charMultiple)
     else if (nbstop == US_MR_NBSTOP_2_BIT) stopBits = 2;
 
     // --------------------------
+    // Bits per char
+    return 1 + dataBits + parityBits + stopBits;
+}
+
+
+uint32_t DUERS485DMAClass::getUsecForNChar(float nChar)
+{
     // Baud rate
     // On Due core, baud is stored in BRGR
     uint32_t cd = (_pUsart->US_BRGR & US_BRGR_CD_Msk) >> US_BRGR_CD_Pos;
     if (cd == 0) cd = 1; // avoid division by zero
     uint32_t baud = SystemCoreClock / (16 * cd);
 
-    // --------------------------
-    // Bits per char
-    uint8_t bitsPerChar = 1 + dataBits + parityBits + stopBits;
-
     // Character time in microseconds
-    float charTimeUs = (bitsPerChar * 1000000.0f) / baud;
+    float charTimeUs = (getBitsPerChar() * 1000000.0f) / baud;
 
-    // Desired idle time
-    unsigned long idleTimeUs = (unsigned long)(charTimeUs * charMultiple);
+    // time
+    return (unsigned long)(charTimeUs * nChar);
+}
 
-    // RTOR counts in bit times, not microseconds
-    uint32_t rtor = (idleTimeUs * baud) / 1000000UL;
-    if (rtor > 255) rtor = 255; // hardware limit
+
+void DUERS485DMAClass::setRXIdleTime(uint32_t idleTimeUs)
+{
+    // Baud rate
+    // On Due core, baud is stored in BRGR
+    uint32_t cd = (_pUsart->US_BRGR & US_BRGR_CD_Msk) >> US_BRGR_CD_Pos;
+    if (cd == 0) cd = 1; // avoid division by zero
+    uint32_t baud = SystemCoreClock / (16 * cd);
+
+    uint32_t oneCharTimeUs = getUsecForNChar(1);
 
     _endRX = true;
+    _rxIdleTimeUs = (idleTimeUs > oneCharTimeUs) ? idleTimeUs-oneCharTimeUs : 0;
+}
+
+
+void DUERS485DMAClass::setRxTimeout()
+{
+    // RTOR counts in bit times, not microseconds
+    int rtor = getBitsPerChar() +1; //set timeout 1 char time + 1 bit margin
     _pUsart->US_RTOR = US_RTOR_TO(rtor);
     _pUsart->US_CR = US_CR_STTTO; // restart timeout counter
-    //_pUsart->US_IER |= US_IER_TIMEOUT;   // enable timeout interrupt
 }
+
 
 void DUERS485DMAClass::end()
 {
@@ -203,13 +212,13 @@ int DUERS485DMAClass::peek()
 
 int DUERS485DMAClass::available()
 {
-    updateRXBuffer();// Copy new DMA-received bytes to ring buffer
+    //updateRXBuffer();// Copy new DMA-received bytes to ring buffer
     return UARTClass::available();
 }
 
 int DUERS485DMAClass::read()
 {
-    updateRXBuffer();// Copy new DMA-received bytes to ring buffer
+    //updateRXBuffer();// Copy new DMA-received bytes to ring buffer
     return UARTClass::read();
 }
 
@@ -275,6 +284,14 @@ void DUERS485DMAClass::receive() {
 }
 
 void DUERS485DMAClass::noReceive() {
+    uint32_t start = micros();
+    while (!isRxIdle()){
+        yield();
+        if (micros() - start > RS485_RX_STALL_TIMEOUT_US) {
+            break; // Exit if we've waited significantly past idle time
+        }
+    }
+
     _pUsart->US_PTCR = US_PTCR_RXTDIS; // Disable PDC (DMA) receiver
     _pUsart->US_CR = US_CR_RXDIS; // Disable USART RX
     _pUsart->US_IDR = US_IDR_ENDRX //disable interrupts
@@ -288,11 +305,13 @@ void DUERS485DMAClass::noReceive() {
     // so the caller can still read any pending bytes after stopping reception.
 }
 
+
 void DUERS485DMAClass::sendBreak(unsigned int duration)
 {
     if (duration > 1000) duration = 1000; // Cap at 1 second break
     sendBreakMicroseconds(duration*1000);
 }
+
 
 void DUERS485DMAClass::sendBreakMicroseconds(unsigned int duration)
 {
@@ -304,15 +323,25 @@ void DUERS485DMAClass::sendBreakMicroseconds(unsigned int duration)
     endTransmission();            // De-assert DE pin
 }
 
+
+bool DUERS485DMAClass::isRxIdle()
+{
+    if (!_endRX) return false; // Not idle if RX not marked complete
+    return micros() - _rxIdleStamp >= _rxIdleTimeUs;
+}
+
+
 void DUERS485DMAClass::onTxComplete(TxCompleteCallback cb)
 {
     _txCallback = cb;
 }
 
+
 inline uint32_t DUERS485DMAClass::ring_buffer_size(const RingBuffer* rb) const
 {
     return (rb->_iHead + SERIAL_BUFFER_SIZE - rb->_iTail) % SERIAL_BUFFER_SIZE;
 }
+
 
 void DUERS485DMAClass::updateRXBuffer()
 {
@@ -329,11 +358,12 @@ void DUERS485DMAClass::updateRXBuffer()
     }
 
     // If we have copied all DMA data and ring buffer has space, restart DMA
-    if ((_dma_rx_pos >= DMA_RX_BUFFER_SIZE) && (ring_buffer_size(_rx_buffer) < SERIAL_BUFFER_SIZE - 1)) {
+    if ((_dma_rx_pos >= DMA_RX_BUFFER_SIZE) && (ring_buffer_size(_rx_buffer) <= SERIAL_BUFFER_SIZE - 1)) {
         // Reset DMA for next block
         _dma_rx_pos = 0;
     }
 }
+
 
 void DUERS485DMAClass::triggerDMATXFromBuffer()
 {
@@ -395,7 +425,9 @@ void DUERS485DMAClass::IrqHandler()
     }
 
     if (status & US_CSR_TIMEOUT) {
+        updateRXBuffer();  // Push remaining bytes
         _pUsart->US_CR = US_CR_STTTO; // Clear timeout condition (restart timer)
+        _rxIdleStamp = micros(); // Update idle timestamp
         _endRX = true;                // Mark RX as complete
     }
     
@@ -478,3 +510,17 @@ extern "C" void USART2_Handler(void)
     RS485_USART2.IrqHandler();
 }
 #endif
+
+
+/*
+TO DO:
+X-Move char to us in separate function.
+X-change setIdleTime to ms to better fit user expectation
+X-add timeout set to 1 char
+X-add isRxIdle()
+X-implement timeout guard for rx and tx
+
+
+
+
+*/

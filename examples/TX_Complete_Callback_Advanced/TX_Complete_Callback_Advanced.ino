@@ -11,8 +11,10 @@
 
 #include <DUERS485DMA.h>
 
+bool txDone = false;
+
 void onTxDone() {
-  Serial.println("TX finished!");
+  txDone = true;
 }
 
 void setup() {
@@ -26,4 +28,9 @@ void loop() {
   RS485.print("Data frame");
   RS485.endTransmission();
   delay(2000);
+
+  if (txDone) { //if callback have been called, print message and reset flag
+    Serial.println("Transmission complete!");
+    txDone = false;
+  } 
 }

@@ -188,3 +188,94 @@ void setup() {
   ModbusClient.begin(1, 9600); // nodeId = 1
 }
 ```
+
+
+## Advanced RS485 Timing & Control (SAM3X / DMA)
+
+This library exposes additional helper functions for advanced timing control and DMA-based RS485 operation.
+These functions are optional and are not part of the standard ArduinoRS485 API.
+
+----
+
+```
+setTxTimeout(int timeoutUs);
+```
+
+### Sets a guard timeout for transmission completion.
+
+This timeout prevents the application from blocking indefinitely if transmission does not complete as expected (e.g. bus contention or hardware fault).
+
+timeoutUs: timeout in microseconds
+
+Notes
+
+This is a safety guard, not a protocol timing parameter.
+
+It does not affect baud rate or frame timing.
+
+----
+
+```
+setRXIdleTime(uint32_t idleTimeUs)
+```
+### Sets the software RX frame idle time used to detect the end of a received frame.
+
+This value represents the minimum duration of RX inactivity required to consider a frame complete.
+
+idleTimeUs: idle duration in microseconds
+
+Typical values
+
+Modbus RTU: getUsecForNChar(3.5f)
+
+Custom protocols: protocol-dependent
+
+Notes
+
+This is distinct from the hardware RX silence timeout (RTOR).
+
+This function does not block.
+
+----
+
+```
+getUsecForNChar(float nChar)
+```
+
+### Returns the duration (in microseconds) of nChar serial characters based on the current USART configuration.
+
+This function accounts for serial mode; data bits, parity, stop bits, baud rate
+
+Example
+
+```
+uint32_t modbusIdle = getUsecForNChar(3.5f);
+setRXIdleTime(modbusIdle);
+```
+
+----
+
+```
+isRxIdle()
+```
+
+### Indicates whether the receiver has been idle long enough to consider the current frame complete.
+
+Returns:
+
+true if RX frame idle time has elapsed
+
+false otherwise
+
+Usage
+
+```
+if (isRxIdle()) {
+    // Safe to process received frame
+}
+```
+
+Notes
+
+This function does not block. It relies on RX timeout interrupts and internal timestamps.
+

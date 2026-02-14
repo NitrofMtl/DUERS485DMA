@@ -38,7 +38,8 @@ constexpr DUERS485Configs RS485_SERIAL2_CONFIGS { USART1, USART1_IRQn, ID_USART1
 constexpr DUERS485Configs RS485_SERIAL3_CONFIGS { USART3, USART3_IRQn, ID_USART3, &rx_buffer4, &tx_buffer4 };
 constexpr DUERS485Configs RS485_USART2_CONFIGS { USART2, USART2_IRQn, ID_USART2, &rx_buffer5, &tx_buffer5 };
 
-constexpr float DEFAULT_CHAR_TIME = 3.5f;
+constexpr float RS485DEFAULT_RX_IDLE_CHARS = 3.5f;
+constexpr uint32_t RS485_RX_STALL_TIMEOUT_US = 2000; //fallback if char time calculation fails
 
 typedef void (*TxCompleteCallback)();
 
@@ -62,14 +63,6 @@ public:
     using Print::write; // pull in write(str) and write(buf, size) from Print
     inline bool beginTransmission()
     {
-        unsigned long start = micros();
-        while (!_endRX) {
-            if (micros() - start > _txTimeoutUs){
-                return false; // RX not done
-            } 
-            yield();
-        }
-
         if (_dePin >= 0) {
             digitalWrite(_dePin, HIGH);
             if (_preDelay > 0) delayMicroseconds(_preDelay);
@@ -86,26 +79,24 @@ public:
         if (_txBusy) return false;
         flush();
         if (_postDelay > 0) delayMicroseconds(_postDelay);
-        handleTxComplete();
-        return true;
-    };
-    inline void handleTxComplete()
-    {
         if (_dePin >= 0) {
                 digitalWrite(_dePin, LOW);
-            }
-            _transmitting = false;
+        }
+        _transmitting = false;
+        return true;
     };
 
     
     void setPins(int txPin, int dePin, int rePin);
     void setDelays(int predelay, int postdelay);
     void setTxTimeout(int timeout);
-    void setRXIdleTime(float charMultiple = DEFAULT_CHAR_TIME);
+    void setRXIdleTime(uint32_t idleTimeUs);
 
     void sendBreak(unsigned int duration);
     void sendBreakMicroseconds(unsigned int duration);
 
+    uint32_t getUsecForNChar(float nChar);
+    bool isRxIdle();
     
     void onTxComplete(TxCompleteCallback cb);
     
@@ -119,6 +110,8 @@ private:
     inline void updateRXBuffer();
     inline void triggerDMATXFromBuffer();
     uint32_t ring_buffer_size(const RingBuffer* rb) const;
+    int getBitsPerChar() const;
+    void setRxTimeout();
 
     static const uint32_t DMA_RX_BUFFER_SIZE = 128;
     
@@ -128,6 +121,7 @@ private:
     TxCompleteCallback _txCallback = nullptr;
     volatile uint32_t _dma_rx_pos = 0;
     volatile uint32_t _txLen = 0;
+    volatile uint32_t _rxIdleStamp = 0;
     // End of RX flag: true when DMA RX has completed or timeout triggered
     volatile bool _endRX = true;
     // Transmission busy flag: true when DMA TX in progress
@@ -138,6 +132,7 @@ private:
     uint32_t _preDelay = 0;
     uint32_t _postDelay = 0;
     uint32_t _txTimeoutUs = 0;
+    uint32_t _rxIdleTimeUs = 0;
 };
 
 #ifdef USE_RS485_SERIAL1
