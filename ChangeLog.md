@@ -1,3 +1,17 @@
+- 0.9.8 : 2026/02/24
+### Changed
+- Restored updateBuffer() call in polling paths (available() / readBytes()) to ensure proper RX synchronization.
+- Improved IRQ handling to provide more consistent timing behavior.
+- Default postDelay set to 0 (transmission completion already guaranteed by flush()).
+
+### Added
+- Added optional readFrame() helper function for frame-based access (not used by default Stream/Modbus flow).
+
+### Fixed
+- Resolved RX timing issue that could cause premature frame detection and Modbus timeouts.
+- Improved buffer handling consistency between interrupt and polling modes.
+
+
 - 0.9.7 : 
 ### Added
 - Hardware RX silence detection using USART Receiver Timeout (RTOR).

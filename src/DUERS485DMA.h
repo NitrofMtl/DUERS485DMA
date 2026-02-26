@@ -60,36 +60,28 @@ public:
     size_t write(uint8_t c) override;
     size_t write(const uint8_t *buffer, size_t size) override;
     size_t readBytes(uint8_t *buffer, size_t length);
+    size_t readFrame(uint8_t *buffer, size_t length);
     using Print::write; // pull in write(str) and write(buf, size) from Print
-    inline bool beginTransmission()
+    inline void beginTransmission()
     {
         if (_dePin >= 0) {
             digitalWrite(_dePin, HIGH);
             if (_preDelay > 0) delayMicroseconds(_preDelay);
         }
-        _transmitting = true;
-        return true;
     };
-    inline bool endTransmission()
+    inline void endTransmission()
     {
-        unsigned long start = micros();  
-        // blocking until DMA done
-        while (_txBusy && (micros() - start < _txTimeoutUs)) yield();
-
-        if (_txBusy) return false;
-        flush();
-        if (_postDelay > 0) delayMicroseconds(_postDelay);
+        flush(); //wait TX line to be empty
+        uint32_t start = micros();
+        while (micros() - start < _postDelay) yield();
         if (_dePin >= 0) {
-                digitalWrite(_dePin, LOW);
-        }
-        _transmitting = false;
-        return true;
+            digitalWrite(_dePin, LOW);
+        }   
     };
 
-    
     void setPins(int txPin, int dePin, int rePin);
     void setDelays(int predelay, int postdelay);
-    void setTxTimeout(int timeout);
+    void setTxTimeoutGuard(int timeout);
     void setRXIdleTime(uint32_t idleTimeUs);
 
     void sendBreak(unsigned int duration);
@@ -108,10 +100,15 @@ private:
     
     void configurePins();
     inline void updateRXBuffer();
+    inline void onRxIdleIRQ();
     inline void triggerDMATXFromBuffer();
     uint32_t ring_buffer_size(const RingBuffer* rb) const;
     int getBitsPerChar() const;
     void setRxTimeout();
+    inline const uint8_t* rxBufferPtr(size_t index) const {//remove volatile from buffer for memcpy()
+        return const_cast<const uint8_t*>(&_rx_buffer->_aucBuffer[index]);
+    }
+    bool rxActivity();
 
     static const uint32_t DMA_RX_BUFFER_SIZE = 128;
     
@@ -123,16 +120,26 @@ private:
     volatile uint32_t _txLen = 0;
     volatile uint32_t _rxIdleStamp = 0;
     // End of RX flag: true when DMA RX has completed or timeout triggered
-    volatile bool _endRX = true;
-    // Transmission busy flag: true when DMA TX in progress
+    volatile uint8_t _lastRcrSnapshot = _pUsart->US_RCR;
     volatile bool _txBusy = false;
+    bool _txPhysDone = false;
+        
     
-    bool _transmitting = false;
+    //bool _transmitting = false;
     int _dePin = -1;
     uint32_t _preDelay = 0;
     uint32_t _postDelay = 0;
-    uint32_t _txTimeoutUs = 0;
+    uint32_t _txTimeoutGuardUs = 0;
     uint32_t _rxIdleTimeUs = 0;
+    uint32_t _txEndStamp   = 0;
+
+    struct {
+        uint32_t idleTimeStamp;
+        uint8_t len = 0;
+        uint8_t head = 0;
+        bool armed = false;
+        bool overflow = false;
+    } volatile _frame;
 };
 
 #ifdef USE_RS485_SERIAL1

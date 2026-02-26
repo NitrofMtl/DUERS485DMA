@@ -153,8 +153,8 @@ You can define a default alias for convenience:
 
 void setup() {
   RS485.begin(BAUDRATE);
-  //preDealy should be very shrot, postDelay is good set as one char (10 bits in SERIAL_8N1, default mode)
-  RS485.setDelays(50, 1000000/BAUDRATE*20);
+  //preDealy should be very short, postDelay is not need (see note)
+  RS485.setDelays(50, 0);
 
 }
 
@@ -165,6 +165,10 @@ void loop() {
   delay(1000);
 }
 ```
+
+## NOTE
+
+On SAM3X (Arduino Due), flush() waits for US_CSR_TXEMPTY, meaning the last stop bit is fully transmitted. Therefore, additional post-transmission delay is unnecessary and may interfere with Modbus timing. Default postDelay = 0.
 
 ## 🔗 Using with ArduinoModbus
 
@@ -198,7 +202,7 @@ These functions are optional and are not part of the standard ArduinoRS485 API.
 ----
 
 ```
-setTxTimeout(int timeoutUs);
+setTxTimeoutGuard(int timeoutUs);
 ```
 
 ### Sets a guard timeout for transmission completion.

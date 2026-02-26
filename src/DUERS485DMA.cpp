@@ -12,6 +12,7 @@ DUERS485DMAClass::DUERS485DMAClass(DUERS485Configs cfg)
     }
 }
 
+
 void DUERS485DMAClass::configurePins()
 {
     switch (_dwId) {
@@ -47,30 +48,33 @@ void DUERS485DMAClass::configurePins()
             // Optionally fail here or leave pins untouched
             break;
     }
-
 }
+
 
 void DUERS485DMAClass::begin(unsigned long baudrate)
 {
     begin(baudrate, SERIAL_8N1, 0, 0);
 }
 
+
 void DUERS485DMAClass::begin(unsigned long baudrate, int predelay, int postdelay)
 {
     begin(baudrate, SERIAL_8N1, predelay, postdelay);
 }
+
 
 void DUERS485DMAClass::begin(unsigned long baudrate, UARTClass::UARTModes config)
 {
     begin(baudrate, config, 0, 0);
 }
 
+
 void DUERS485DMAClass::begin(unsigned long baudrate, UARTClass::UARTModes config, int predelay, int postdelay)
 {
     _preDelay = predelay;
     _postDelay = postdelay;
-    _txTimeoutUs = (uint32_t)((10UL * SERIAL_BUFFER_SIZE * 1000000UL) / baudrate);
-    _txTimeoutUs = _txTimeoutUs + _txTimeoutUs / 5;  // Add ~20% margin
+    _txTimeoutGuardUs = (uint32_t)((10UL * SERIAL_BUFFER_SIZE * 1000000UL) / baudrate);
+    _txTimeoutGuardUs = _txTimeoutGuardUs + _txTimeoutGuardUs / 5;  // Add ~20% margin
 
     configurePins();
 
@@ -98,6 +102,7 @@ void DUERS485DMAClass::begin(unsigned long baudrate, UARTClass::UARTModes config
     NVIC_EnableIRQ(_dwIrq);
 }
 
+
 //tx and re pins are here to match arduinoRS485 library
 void DUERS485DMAClass::setPins(int txPin, int dePin, int rePin)
 {
@@ -108,15 +113,17 @@ void DUERS485DMAClass::setPins(int txPin, int dePin, int rePin)
     }
 }
 
+
 void DUERS485DMAClass::setDelays(int predelay, int postdelay)
 {
     _preDelay = predelay;
     _postDelay = postdelay;
 }
 
-void DUERS485DMAClass::setTxTimeout(int timeout)
+
+void DUERS485DMAClass::setTxTimeoutGuard(int timeout)
 {
-    _txTimeoutUs = timeout;
+    _txTimeoutGuardUs = timeout;
 }
 
 
@@ -167,15 +174,7 @@ uint32_t DUERS485DMAClass::getUsecForNChar(float nChar)
 
 void DUERS485DMAClass::setRXIdleTime(uint32_t idleTimeUs)
 {
-    // Baud rate
-    // On Due core, baud is stored in BRGR
-    uint32_t cd = (_pUsart->US_BRGR & US_BRGR_CD_Msk) >> US_BRGR_CD_Pos;
-    if (cd == 0) cd = 1; // avoid division by zero
-    uint32_t baud = SystemCoreClock / (16 * cd);
-
     uint32_t oneCharTimeUs = getUsecForNChar(1);
-
-    _endRX = true;
     _rxIdleTimeUs = (idleTimeUs > oneCharTimeUs) ? idleTimeUs-oneCharTimeUs : 0;
 }
 
@@ -195,14 +194,18 @@ void DUERS485DMAClass::end()
     UARTClass::end();
 }
 
+
 void DUERS485DMAClass::flush()
 {
-    unsigned long start = micros();
-    while (_txBusy || ring_buffer_size(_tx_buffer) > 0 || !(_pUsart->US_CSR & US_CSR_TXEMPTY)) {
-        yield();
-        if (micros() - start > _txTimeoutUs) return;
+   uint32_t start = micros();
+   while (!_txPhysDone) { //wait usart to emty
+    if (micros() - start > _txTimeoutGuardUs) {
+        break;
     }
+    yield();
+   }
 }
+
 
 int DUERS485DMAClass::peek()
 {
@@ -210,11 +213,13 @@ int DUERS485DMAClass::peek()
     return UARTClass::peek();
 }
 
+
 int DUERS485DMAClass::available()
 {
-    //updateRXBuffer();// Copy new DMA-received bytes to ring buffer
+    updateRXBuffer();// Copy new DMA-received bytes to ring buffer
     return UARTClass::available();
 }
+
 
 int DUERS485DMAClass::read()
 {
@@ -222,12 +227,14 @@ int DUERS485DMAClass::read()
     return UARTClass::read();
 }
 
+
 size_t DUERS485DMAClass::write(uint8_t c)
 {
     size_t written = UARTClass::write(c);
     triggerDMATXFromBuffer();
     return written;
 }
+
 
 size_t DUERS485DMAClass::write(const uint8_t *buffer, size_t size)
 {
@@ -247,41 +254,100 @@ size_t DUERS485DMAClass::write(const uint8_t *buffer, size_t size)
     return written;
 }
 
-size_t DUERS485DMAClass::readBytes(uint8_t *buffer, size_t length) {
+
+size_t DUERS485DMAClass::readBytes(uint8_t *buffer, size_t length)
+{
     size_t count = 0;
     unsigned long start = millis();
+
     while (count < length) {
-        if (available()) {
-            buffer[count++] = read(); // pull from DMA ring buffer
-            start = millis(); // reset timeout after each byte
+        //updateRXBuffer();
+
+        size_t avail = available();
+        if (avail) {
+            size_t toRead = min(avail, length - count);
+
+            size_t tail = _rx_buffer->_iTail;
+            if (tail + toRead <= DMA_RX_BUFFER_SIZE) {
+                memcpy(buffer + count, rxBufferPtr(tail), toRead);
+            } else {
+                size_t first = DMA_RX_BUFFER_SIZE - tail;
+                memcpy(buffer + count, rxBufferPtr(tail), first);
+                memcpy(buffer + count + first, rxBufferPtr(0), toRead - first);
+            }
+
+            _rx_buffer->_iTail = (tail + toRead) % DMA_RX_BUFFER_SIZE;
+            count += toRead;
+            start = millis();  // reset timeout on progress
         }
-        if (millis() - start >= _timeout) break; // same logic as Arduino's Stream
+
+        if (millis() - start >= _timeout) {
+            break;
+        }
+        yield();
     }
     return count;
 }
 
+
+size_t DUERS485DMAClass::readFrame(uint8_t *buffer, size_t length)
+{ 
+    if (!_frame.armed) return 0; // No complete frame available
+
+    if (micros() - _frame.idleTimeStamp < _rxIdleTimeUs) return 0; // still in post-idle guard
+
+    size_t len = min(length, _frame.len);
+
+    size_t tail = (_frame.head + DMA_RX_BUFFER_SIZE - _frame.len) % DMA_RX_BUFFER_SIZE;
+
+    if (len + tail > DMA_RX_BUFFER_SIZE) {
+        // Wrap around case
+        size_t firstPart = DMA_RX_BUFFER_SIZE - tail;
+        memcpy(buffer, rxBufferPtr(tail), firstPart);
+        memcpy(buffer + firstPart, rxBufferPtr(0), len - firstPart);
+    } else {
+        // Contiguous case
+        memcpy(buffer, rxBufferPtr(tail), len);
+    }
+    _rx_buffer->_iTail = (_rx_buffer->_iTail + len) % DMA_RX_BUFFER_SIZE;
+    _frame.len -= len;
+
+     // If we've read the entire frame, disarm it
+    if (_frame.len == 0) {
+        _frame.armed = false;
+        if (_frame.overflow) {
+            _rx_buffer->_iTail = _rx_buffer->_iHead; // Drop remaining data in ring buffer
+            _frame.overflow = false; // reset overflow flag for next frame
+            Serial.println("[[[OVERFLOW!!!]]]");
+        }
+    }
+
+    return len;
+}
+
+
 void DUERS485DMAClass::receive() {
     // --- Ensure receiver is stopped before reconfiguring ---
     _pUsart->US_PTCR = US_PTCR_RXTDIS;  // Disable DMA RX
-    _pUsart->US_CR   = US_CR_RXDIS;     // Disable USART RX
     _pUsart->US_IDR  = US_IDR_TXRDY | US_IDR_TXEMPTY | US_IDR_TXBUFE; // Disable all TX interrupts
-
+    _pUsart->US_CR   = US_CR_RXDIS;     // Disable USART RX 
         // Clear any pending error/status flags (stale RXRDY, etc.)
     _pUsart->US_CR = US_CR_RSTSTA;
 
     // Reset DMA buffer pointer & count
     _pUsart->US_RPR = (uint32_t)_dma_rx_buffer;
     _pUsart->US_RCR = DMA_RX_BUFFER_SIZE;
-    // Enable PDC (DMA) reception
-    _pUsart->US_PTCR = US_PTCR_RXTEN;
+    _lastRcrSnapshot = _pUsart->US_RCR; //set for activity detection
+    _dma_rx_pos = 0; // Reset our tracking index as well
     // Re-enable receiver
     _pUsart->US_CR = US_CR_RXEN;
-    _pUsart->US_IER = US_IER_ENDRX      // DMA buffer full
-                    | US_IER_RXRDY      // Short frame reception
-                    | US_IER_TIMEOUT;   // Idle line timeout detection
+    // Enable PDC (DMA) reception
+    _pUsart->US_PTCR = US_PTCR_RXTEN;
     // Timeout setup
-    _pUsart->US_CR = US_CR_STTTO;                
+    _pUsart->US_CR = US_CR_STTTO;
+    _pUsart->US_IER = US_IER_TIMEOUT;
 }
+
 
 void DUERS485DMAClass::noReceive() {
     uint32_t start = micros();
@@ -295,7 +361,7 @@ void DUERS485DMAClass::noReceive() {
     _pUsart->US_PTCR = US_PTCR_RXTDIS; // Disable PDC (DMA) receiver
     _pUsart->US_CR = US_CR_RXDIS; // Disable USART RX
     _pUsart->US_IDR = US_IDR_ENDRX //disable interrupts
-                    | US_IDR_RXRDY
+                    //| US_IDR_RXRDY
                     | US_IDR_TIMEOUT;
 
     // Clear any pending error/status flags
@@ -324,16 +390,16 @@ void DUERS485DMAClass::sendBreakMicroseconds(unsigned int duration)
 }
 
 
-bool DUERS485DMAClass::isRxIdle()
-{
-    if (!_endRX) return false; // Not idle if RX not marked complete
-    return micros() - _rxIdleStamp >= _rxIdleTimeUs;
-}
-
-
 void DUERS485DMAClass::onTxComplete(TxCompleteCallback cb)
 {
     _txCallback = cb;
+}
+
+
+bool DUERS485DMAClass::isRxIdle()
+{
+    if (rxActivity()) return false; // Not idle if RX not marked complete
+    return micros() - _rxIdleStamp >= _rxIdleTimeUs;
 }
 
 
@@ -356,12 +422,6 @@ void DUERS485DMAClass::updateRXBuffer()
         _dma_rx_pos++;
         
     }
-
-    // If we have copied all DMA data and ring buffer has space, restart DMA
-    if ((_dma_rx_pos >= DMA_RX_BUFFER_SIZE) && (ring_buffer_size(_rx_buffer) <= SERIAL_BUFFER_SIZE - 1)) {
-        // Reset DMA for next block
-        _dma_rx_pos = 0;
-    }
 }
 
 
@@ -379,12 +439,19 @@ void DUERS485DMAClass::triggerDMATXFromBuffer()
     uint8_t* src = const_cast<uint8_t*>(&_tx_buffer->_aucBuffer[tail]);
 
     _txBusy = true;
+    _txPhysDone = false;
 
     _pUsart->US_TPR = (uint32_t)src;
     _pUsart->US_TCR = _txLen;
     _pUsart->US_PTCR = US_PTCR_TXTEN;
+    // Enable interruptS when buffer is empty and usart empty
+    _pUsart->US_IER = US_IER_TXBUFE;// | US_CSR_TXEMPTY;
+}
 
-    _pUsart->US_IER = US_IER_TXBUFE; // Enable interrupt when buffer is empty*/
+
+bool DUERS485DMAClass::rxActivity()
+{
+    return _lastRcrSnapshot != _pUsart->US_RCR;
 }
 
 
@@ -392,7 +459,7 @@ void DUERS485DMAClass::IrqHandler()
 {    
     uint32_t status = _pUsart->US_CSR;
     if ( _txBusy && (status & US_CSR_TXBUFE)) {
-        
+        //US_CSR_TXEMPTY
         _pUsart->US_IDR = US_IDR_TXBUFE;
         _tx_buffer->_iTail = (_tx_buffer->_iTail + _txLen) % SERIAL_BUFFER_SIZE;
         
@@ -404,33 +471,50 @@ void DUERS485DMAClass::IrqHandler()
             _pUsart->US_TCR = 0;
             _pUsart->US_TPR = 0;
             // Kill all USART TX interrupts
-            _pUsart->US_IDR = US_IDR_TXRDY | US_IDR_TXEMPTY | US_IDR_TXBUFE;
-            if (_txCallback) {
-                _txCallback();
-            }
+            _pUsart->US_IDR = US_IDR_TXRDY | US_IDR_TXBUFE;
+            _pUsart->US_IER = US_IER_TXEMPTY;
 
         } else {// Immediately restart if there’s more to send
             triggerDMATXFromBuffer();
         }
     }
 
-    //RX buffer reset when all put to buffer
-    if (status & US_CSR_ENDRX) {
-        updateRXBuffer();  // Push remaining bytes
-        receive();      // Restart RX DMA
-    }
+    if (status & US_CSR_TXEMPTY) {
+        _pUsart->US_IDR = US_IDR_TXEMPTY;
 
-    if (status & US_CSR_RXRDY) {
-        _endRX = false;
+        _txPhysDone   = true;
+        _txEndStamp   = micros();
+        if (_txCallback) {
+            _txCallback();
+        }
     }
 
     if (status & US_CSR_TIMEOUT) {
         updateRXBuffer();  // Push remaining bytes
-        _pUsart->US_CR = US_CR_STTTO; // Clear timeout condition (restart timer)
-        _rxIdleStamp = micros(); // Update idle timestamp
-        _endRX = true;                // Mark RX as complete
+        onRxIdleIRQ();
     }
     
+}
+
+
+void DUERS485DMAClass::onRxIdleIRQ()
+{
+    _pUsart->US_CR = US_CR_STTTO; // Clear timeout condition (restart timer)
+    _rxIdleStamp = micros(); // Update idle timestamp
+    //_endRX = true;                // Mark RX as complete
+    _lastRcrSnapshot = _pUsart->US_RCR; //set for activity detection
+
+    if (_frame.armed && !( _rxIdleStamp - _frame.idleTimeStamp > _rxIdleTimeUs)) {
+        _frame.overflow = true;
+        return;
+    }
+
+    _frame.head = _rx_buffer->_iHead;
+    size_t len = (_frame.head - _rx_buffer->_iTail + DMA_RX_BUFFER_SIZE) % DMA_RX_BUFFER_SIZE;
+    if (len == 0) return;   // ignore spurious IDLE
+    _frame.len = len;
+    _frame.idleTimeStamp = _rxIdleStamp;
+    _frame.armed = true;
 }
 
 
@@ -510,17 +594,3 @@ extern "C" void USART2_Handler(void)
     RS485_USART2.IrqHandler();
 }
 #endif
-
-
-/*
-TO DO:
-X-Move char to us in separate function.
-X-change setIdleTime to ms to better fit user expectation
-X-add timeout set to 1 char
-X-add isRxIdle()
-X-implement timeout guard for rx and tx
-
-
-
-
-*/
